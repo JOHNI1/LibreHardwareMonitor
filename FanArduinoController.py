@@ -21,57 +21,44 @@ def on_sign_out():
     send_to_arduino('0')
 
 def get_temperature_from_ohm():
-    global isRunning
+    global isRunning, last_temp
     while isRunning:
         try:
-            response = requests.get("http://localhost:8085/data.json")  # Default OHM web server URL
-            data = response.json()
-            # Parse the JSON data for your specific sensor information
-            # The structure of the JSON needs to be navigated to find the correct temperature reading
-            # Placeholder for actual parsing logic
-        except Exception as e:
-            print(f"Failed to retrieve temperature: {e}")
-        finally:
-            time.sleep(30)
-
-def get_temperature_from_ohm():
-    global isRunning
-    global last_temp
-    while isRunning:
-        try:
-            response = requests.get("http://localhost:8085/data.json")  # Default OHM web server URL
+            response = requests.get("http://localhost:8085/data.json")
             data = response.json()
             
-            # Initialize variable to store GPU temperature
-            gpu_temp = None
-            
-            # Search for the GPU temperature in the JSON data
+            # Attempt to find and process GPU temperature
+            gpu_temp_str = None  # Use a separate variable to hold the string value
             for hardware in data['Children']:
-                if 'NVIDIA' in hardware['Text']:  # This might need adjustment depending on the actual GPU name
+                if 'NVIDIA' in hardware['Text']:
                     for sensor in hardware['Children']:
                         if sensor['Text'] == 'Temperatures':
                             for temp in sensor['Children']:
                                 if temp['Text'] == 'GPU Core':
-                                    gpu_temp = temp['Value']
+                                    gpu_temp_str = temp['Value']
                                     break
                             
-            # Check if GPU temperature was found and send it to Arduino
-            if gpu_temp is not None:
-                update_arduino = True
-                if 70 < gpu_temp and last_temp < 70:
-                    send_to_arduino("220")
-                elif 60 < gpu_temp < 70 and (last_temp < 60 or 70 < last_temp):
-                    send_to_arduino("150")
-                elif 50 < gpu_temp < 60 and (last_temp < 50 or 60 < last_temp):
+            if gpu_temp_str is not None:
+                gpu_temp = float(gpu_temp_str)  # Convert string to float
+                update_arduino = False
+                if 70 < gpu_temp and last_temp <= 70:
+                    send_to_arduino("240")
+                    update_arduino = True
+                elif 60 < gpu_temp <= 70 and (last_temp <= 60 or last_temp > 70):
+                    send_to_arduino("190")
+                    update_arduino = True
+                elif 50 < gpu_temp <= 60 and (last_temp <= 50 or last_temp > 60):
                     send_to_arduino("120")
-                elif gpu_temp < 50 and 50 < last_temp:
-                    send_to_arduino("100")
-                else:
-                    update_arduino = False
-                    print("arduino fan speed not updated!")
+                    update_arduino = True
+                elif gpu_temp <= 50 and last_temp > 50:
+                    send_to_arduino("80")
+                    update_arduino = True
+                
                 if update_arduino:
-                    print(f"sent fan dutyCycle to Arduino. the gpu temp is: {gpu_temp}°C")
+                    print(f"Sent fan dutyCycle to Arduino. GPU temp: {gpu_temp}°C")
                     last_temp = gpu_temp
+                else:
+                    print("Arduino fan speed not updated. GPU temp: {gpu_temp}°C")
             else:
                 print("GPU temperature not found.")
                 
@@ -79,6 +66,7 @@ def get_temperature_from_ohm():
             print(f"Failed to retrieve temperature: {e}")
         finally:
             time.sleep(30)
+
 
 
 
