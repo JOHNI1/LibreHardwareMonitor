@@ -12,13 +12,18 @@ ser = None
 update_frequency = 5 # once every n seconds
 useOHM = True
 commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using OHM's reading\n"
-
+last_message = "0"
+last_time_was_connected = False
 def send_to_arduino(message):
-    global ser
-    ser.write((message + '\n').encode())
-    #get response from arduino
-    #response = ser.readline().decode('utf-8').rstrip()
-    # print("Received from Arduino:", response)
+    try:
+        global ser
+        global last_message
+        last_message = message
+        ser.write((message + '\n').encode())
+        return True
+    except:
+        print(f"in send_to_arduino Failed to open serial")
+        return False
 
 def on_sign_out():
     global isRunning
@@ -72,18 +77,24 @@ def get_temperature_from_ohm_and_set_arduino():
                         update_arduino = True
                     
                     if update_arduino:
-                        send_arduino(f"new_duty_cycle: {new_duty_cycle}, gpu_temperature: {gpu_temp_str}celsius, last_temp: {last_temp}", new_duty_cycle, gpu_temp)
+                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {new_duty_cycle}, gpu_temperature: {gpu_temp_str}celsius, last_temp: {last_temp}", new_duty_cycle, gpu_temp)
 
                 else:
                     log("GPU temperature not found.(OHM not running.)")
                 
         except Exception as e:
-            log(f"Failed to retrieve temperature: {e}")
-            pass
+            log(f"probably Failed to retrieve temperature so starting OHM!: {e}")
+            try:
+                # Path to OHM executable
+                game_path = "C:\Program Files (x86)\OpenHardwareMonitor\OpenHardwareMonitor.exe"
+                # Launch the OHM
+                os.startfile(game_path)
+            except:
+                pass
         finally:
             time.sleep(update_frequency)
 
-def send_arduino(message, new_duty_cycle, gpu_temp):
+def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle, gpu_temp):
     global last_temp
     log(message)
     send_to_arduino(new_duty_cycle)
@@ -129,7 +140,7 @@ def check_for_command():
                     elif int(commandline[1]) >= 0 and int(commandline[1]) <= 255:
                         useOHM = False
                         inputPWM = commandline[1]
-                        send_arduino(f"new_duty_cycle: {inputPWM} by the commander!", inputPWM, 1000)
+                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {inputPWM} by the commander!", inputPWM, 1000)
                         log(f"commander now incharge!")
                     file.seek(0)
                     file.truncate()
@@ -143,13 +154,35 @@ def check_for_command():
         finally:
             time.sleep(update_frequency)
 
+def redo():
+    global last_message
+    global ser
+    global last_time_was_connected
+    while isRunning:
+        time.sleep(30)
+        if last_time_was_connected:
+            time.sleep(600)
+        else:
+            try:
+                ser = serial.Serial('COM4', 9600, timeout=1)
+                time.sleep(4)
+                send_to_arduino(last_message)
+            except:
+                # print(f"in redo Failed to open serial port")
+                # log(f"in redo Failed to open serial port")
+                pass
+
+
 if __name__ == "__main__":
     # Ensure the script runs with administrator privileges
     if windll.shell32.IsUserAnAdmin():
-        # Setup the serial connection (adjust 'COM4' as needed for your setup)
-        ser = serial.Serial('COM4', 9600, timeout=1)
-        time.sleep(4)
-        
+        try:
+            ser = serial.Serial('COM4', 9600, timeout=1)
+            time.sleep(4)
+        except:
+            # print(f"in main Failed to open serial port")
+            log(f"in main Failed to open serial port")
+
         # print("Sending 150 to Arduino on startup...")
         log("started")
         send_to_arduino('150')
@@ -159,6 +192,10 @@ if __name__ == "__main__":
         t.start()
         commanderrr = threading.Thread(target=check_for_command)
         commanderrr.start()
+        rd = threading.Thread(target=redo)
+        rd.start()
+
+
     else:
         # print("This script requires administrator privileges.")
         # Re-run the script with admin rights if possible
@@ -166,6 +203,3 @@ if __name__ == "__main__":
 
         # if sys.platform == "win32":
         #     os.system(f"powershell Start-Process python '{__file__}' -Verb runAs")
-
-
-
