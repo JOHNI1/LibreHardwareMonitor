@@ -14,6 +14,9 @@ useOHM = True
 commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using OHM's reading\n"
 last_message = "0"
 last_time_was_connected = False
+ohm_start_used = False
+loop_count = 0
+
 def send_to_arduino(message):
     try:
         global ser
@@ -33,7 +36,7 @@ def on_sign_out():
     send_to_arduino('0')
 
 def get_temperature_from_ohm_and_set_arduino():
-    global isRunning, last_temp, useOHM
+    global isRunning, last_temp, useOHM, loop_count
     while isRunning:
         try:
             if useOHM:
@@ -84,15 +87,20 @@ def get_temperature_from_ohm_and_set_arduino():
                 
         except Exception as e:
             log(f"probably Failed to retrieve temperature so starting OHM!: {e}")
-            try:
-                # Path to OHM executable
-                game_path = "C:\Program Files (x86)\OpenHardwareMonitor\OpenHardwareMonitor.exe"
-                # Launch the OHM
-                os.startfile(game_path)
-            except:
-                pass
+            loop_count += 1
+            global ohm_start_used
+            if not ohm_start_used and loop_count > 2:
+                try:
+                    # Path to OHM executable
+                    game_path = "C:\Program Files (x86)\OpenHardwareMonitor\OpenHardwareMonitor.exe"
+                    # Launch the OHM
+                    os.startfile(game_path)
+                    ohm_start_used = True
+                except:
+                    pass
         finally:
             time.sleep(update_frequency)
+            loop_count = 0
 
 def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle, gpu_temp):
     global last_temp
@@ -145,6 +153,8 @@ def check_for_command():
                     file.seek(0)
                     file.truncate()
                     file.write(commander_message)
+            elif os.path.getsize('command.txt') < len(commander_message):
+                file.write(commander_message)
         except:
             try:
                 with open('command.txt', 'w') as file:
