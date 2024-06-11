@@ -2,20 +2,83 @@ import serial
 import os
 from ctypes import windll
 import time
-import requests
-from threading import Timer
 import threading
+
+from HardwareMonitor.Hardware import *  # equivalent to 'using LibreHardwareMonitor.Hardware;'
+
+import psutil
+
+
+
+class UpdateVisitor(IVisitor):
+    __namespace__ = "TestHardwareMonitor"  # must be unique among implementations of the IVisitor interface
+    def VisitComputer(self, computer: IComputer):
+        computer.Traverse(self)
+
+    def VisitHardware(self, hardware: IHardware):
+        hardware.Update()
+        for subHardware in hardware.SubHardware:
+            subHardware.Update()
+
+    def VisitParameter(self, parameter: IParameter): pass
+
+    def VisitSensor(self, sensor: ISensor): pass
+    
+    
+def is_on_battery_power():
+    """
+    Checks if the laptop is currently on battery power.
+
+    Returns:
+        True if on battery power, False if connected to power.
+    """
+    battery = psutil.sensors_battery()
+    return not battery.power_plugged
+
+
+
+
+
+
+# namespace LibreHardwareMonitor.Hardware.Storage;
+computer = Computer()  # settings can not be passed as constructor argument (following below)
+computer.IsMotherboardEnabled = False
+computer.IsControllerEnabled = False
+computer.IsCpuEnabled = True
+computer.IsGpuEnabled = True
+computer.IsBatteryEnabled = False
+computer.IsMemoryEnabled = False
+computer.IsNetworkEnabled = False
+computer.IsStorageEnabled = False
+computer.Open()
+
+def get_temp() -> list[int]:    #[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
+    computer.Accept(UpdateVisitor())
+
+    time.sleep(1)
+    #                           for cpu:↓          ↓for max cpu temp <-sensor
+    cpu_max_tmp = int(computer.Hardware[0].Sensors[83].Value)
+    #                               for cpu:↓          ↓for average cpu temp <-sensor
+    cpu_average_tmp = int(computer.Hardware[0].Sensors[84].Value)
+    #                            for gpu:↓          ↓for max gpu temp <-sensor
+    gpu_max_temp = int(computer.Hardware[1].Sensors[19].Value)
+    #                        for gpu:↓          ↓for gpu temp <-sensor
+    gpu_average_temp = int(computer.Hardware[1].Sensors[0].Value)
+
+    returnList = [cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
+
+    return returnList
+
 
 isRunning = True
 last_temp = 1000         #set it very high so first iteration of get_temperature_from_ohm() will definatly change the fan speed to the appropiate dutyCycle.
 ser = None
-update_frequency = 5 # once every n seconds
-useOHM = True
+update_frequency = 20 # once every n seconds
+useLHM = True
 commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using OHM's reading\n"
 last_message = "0"
-last_time_was_connected = False
-ohm_start_used = False
-loop_count = 0
+last_used_battery = True
+
 
 def send_to_arduino(message):
     try:
@@ -25,88 +88,63 @@ def send_to_arduino(message):
         ser.write((message + '\n').encode())
         return True
     except:
-        print(f"in send_to_arduino Failed to open serial")
+        log(f"in send_to_arduino Failed to open serial")
         return False
 
 def on_sign_out():
     global isRunning
-    isRunning = False
+    isRunning = False 
     log("ended by FanArduinoController.pyw")
     # print("Signing out... Sending 0 to Arduino")
     send_to_arduino('0')
 
-def get_temperature_from_ohm_and_set_arduino():
-    global isRunning, last_temp, useOHM, loop_count
+
+
+
+average_temp = None
+weights = [1.2, 0.8, 1.2, 0.8]   # <=[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
+temps = None
+update_arduino = False
+new_duty_cycle = None
+
+def get_temperature_from_lhm_and_set_arduino():
+    global isRunning, last_temp, useLHM, loop_count
     while isRunning:
         try:
-            if useOHM:
-                #get gpu info:
-                response = requests.get("http://localhost:8085/data.json")
-                data = response.json()
-
-                gpu_temp_str = None
-
-                def traverse(node):
-                    nonlocal gpu_temp_str
-                    if isinstance(node, dict):
-                        if "Text" in node and node["Text"] == "Temperatures":
-                            for child in node.get("Children", []):
-                                if "Text" in child and child["Text"] == "GPU Core":
-                                    gpu_temp_str = child.get("Value")
-                                    break
-                        else:
-                            for child in node.get("Children", []):
-                                traverse(child)
-
-                # Attempt to find and process GPU temperature
-                traverse(data)
-
-                if gpu_temp_str is not None:
-                    gpu_temp_str = gpu_temp_str.replace(' °C', '')  # Remove ' °C' from the string
-                    gpu_temp = float(gpu_temp_str)
-                    update_arduino = False
-                    new_duty_cycle = None
-                    if (70 < gpu_temp and last_temp <= 70) or gpu_temp == 1000:
-                        new_duty_cycle = "240"
-                        update_arduino = True
-                    elif 60 < gpu_temp and gpu_temp <= 70 and (last_temp <= 60 or 70 < last_temp):
-                        new_duty_cycle = "100"
-                        update_arduino = True
-                    elif 50 < gpu_temp and gpu_temp <= 60 and (last_temp <= 50 or 60 < last_temp):
-                        new_duty_cycle = "23"
-                        update_arduino = True
-                    elif gpu_temp <= 50 and 50 < last_temp:
-                        new_duty_cycle = "10"
-                        update_arduino = True
-                    
-                    if update_arduino:
-                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {new_duty_cycle}, gpu_temperature: {gpu_temp_str}celsius, last_temp: {last_temp}", new_duty_cycle, gpu_temp)
-
-                else:
-                    log("GPU temperature not found.(OHM not running.)")
+            if useLHM:
+                #get processros temp:
                 
-        except Exception as e:
-            log(f"probably Failed to retrieve temperature so starting OHM!: {e}")
-            loop_count += 1
-            global ohm_start_used
-            if not ohm_start_used and loop_count > 2:
                 try:
-                    # Path to OHM executable
-                    game_path = "C:\Program Files (x86)\OpenHardwareMonitor\OpenHardwareMonitor.exe"
-                    # Launch the OHM
-                    os.startfile(game_path)
-                    ohm_start_used = True
+                    temps = get_temp()     #[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
+                    average_temp = int((temps[0]*weights[0]+temps[1]*weights[1]+temps[2]*weights[2]+temps[3]*weights[3])/4)
                 except:
-                    pass
-        finally:
-            time.sleep(update_frequency)
-            loop_count = 0
+                    log("some fucked up shit happened. check the code!")
+                update_arduino = False
+                if (70 < average_temp and last_temp <= 70) or average_temp == 1000:
+                    new_duty_cycle = "240"
+                    update_arduino = True
+                elif 60 < average_temp and average_temp <= 70 and (last_temp <= 60 or 70 < last_temp):
+                    new_duty_cycle = "100"
+                    update_arduino = True
+                elif 50 < average_temp and average_temp <= 60 and (last_temp <= 50 or 60 < last_temp):
+                    new_duty_cycle = "23"
+                    update_arduino = True
+                elif average_temp <= 50 and 50 < last_temp:
+                    new_duty_cycle = "10"
+                    update_arduino = True
+                
+                if update_arduino:
+                    send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {new_duty_cycle},      average_temp: {average_temp}C,      cpu_max: {temps[0]}C,      gpu_max: {temps[2]}C,      last_temp: {last_temp}C", new_duty_cycle, average_temp)
 
-def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle, gpu_temp):
+        except Exception as e:
+            log("some fucked up shit happened. check the code!")
+        time.sleep(update_frequency)
+
+def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle, average_temp):
     global last_temp
     log(message)
     send_to_arduino(new_duty_cycle)
-    last_temp = gpu_temp
+    last_temp = average_temp
 
 def log(message):
     """Logs a message with a timestamp to a limited-size file."""
@@ -135,7 +173,7 @@ def log(message):
         pass
   
 def check_for_command():
-    global useOHM, commander_message, isRunning
+    global useLHM, commander_message, isRunning
     while isRunning:
         try:
             if os.path.getsize('command.txt') > len(commander_message):
@@ -143,10 +181,10 @@ def check_for_command():
                     content = file.read()
                     commandline = content.split("\n")
                     if commandline[1] == "-1":
-                        useOHM = True
+                        useLHM = True
                         log("back at using OHM reading auto control!")
                     elif int(commandline[1]) >= 0 and int(commandline[1]) <= 255:
-                        useOHM = False
+                        useLHM = False
                         inputPWM = commandline[1]
                         send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {inputPWM} by the commander!", inputPWM, 1000)
                         log(f"commander now incharge!")
@@ -165,51 +203,47 @@ def check_for_command():
             time.sleep(update_frequency)
 
 def redo():
-    global last_message
-    global ser
-    global last_time_was_connected
+    global last_message, last_used_battery, ser
     while isRunning:
-        time.sleep(30)
-        if last_time_was_connected:
-            time.sleep(600)
-        else:
+        time.sleep(5)
+        if last_used_battery == True and not is_on_battery_power():
             try:
+                log("computer connected to docking station! starting the serial connection and commanding pwm!")
                 ser = serial.Serial('COM4', 9600, timeout=1)
                 time.sleep(4)
                 send_to_arduino(last_message)
             except:
-                # print(f"in redo Failed to open serial port")
-                # log(f"in redo Failed to open serial port")
                 pass
+        last_used_battery == is_on_battery_power()
+
 
 
 if __name__ == "__main__":
     # Ensure the script runs with administrator privileges
     if windll.shell32.IsUserAnAdmin():
+
         try:
             ser = serial.Serial('COM4', 9600, timeout=1)
             time.sleep(4)
         except:
-            # print(f"in main Failed to open serial port")
             log(f"in main Failed to open serial port")
 
-        # print("Sending 150 to Arduino on startup...")
+
         log("started")
         send_to_arduino('150')
-        t = Timer(update_frequency, get_temperature_from_ohm_and_set_arduino)
-        alive_check_time = time.perf_counter()
+
+
+        t = threading.Thread(target=get_temperature_from_lhm_and_set_arduino)
         log("starting loop")
         t.start()
+
+
         commanderrr = threading.Thread(target=check_for_command)
         commanderrr.start()
+
+
         rd = threading.Thread(target=redo)
         rd.start()
 
-
     else:
-        # print("This script requires administrator privileges.")
-        # Re-run the script with admin rights if possible
-        log("no permission")
-
-        # if sys.platform == "win32":
-        #     os.system(f"powershell Start-Process python '{__file__}' -Verb runAs")
+        log("no permission code exiting")
