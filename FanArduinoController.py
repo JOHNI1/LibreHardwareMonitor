@@ -9,6 +9,17 @@ from HardwareMonitor.Hardware import *  # equivalent to 'using LibreHardwareMoni
 import psutil
 
 
+# namespace LibreHardwareMonitor.Hardware.Storage;
+computer = Computer()  # settings can not be passed as constructor argument (following below)
+computer.IsMotherboardEnabled = False
+computer.IsControllerEnabled = False
+computer.IsCpuEnabled = True
+computer.IsGpuEnabled = True
+computer.IsBatteryEnabled = False
+computer.IsMemoryEnabled = False
+computer.IsNetworkEnabled = False
+computer.IsStorageEnabled = False
+computer.Open()
 
 class UpdateVisitor(IVisitor):
     __namespace__ = "TestHardwareMonitor"  # must be unique among implementations of the IVisitor interface
@@ -23,8 +34,8 @@ class UpdateVisitor(IVisitor):
     def VisitParameter(self, parameter: IParameter): pass
 
     def VisitSensor(self, sensor: ISensor): pass
-    
-    
+
+
 def is_on_battery_power():
     """
     Checks if the laptop is currently on battery power.
@@ -32,25 +43,8 @@ def is_on_battery_power():
     Returns:
         True if on battery power, False if connected to power.
     """
-    battery = psutil.sensors_battery()
-    return not battery.power_plugged
+    return not psutil.sensors_battery().power_plugged
 
-
-
-
-
-
-# namespace LibreHardwareMonitor.Hardware.Storage;
-computer = Computer()  # settings can not be passed as constructor argument (following below)
-computer.IsMotherboardEnabled = False
-computer.IsControllerEnabled = False
-computer.IsCpuEnabled = True
-computer.IsGpuEnabled = True
-computer.IsBatteryEnabled = False
-computer.IsMemoryEnabled = False
-computer.IsNetworkEnabled = False
-computer.IsStorageEnabled = False
-computer.Open()
 
 def get_temp() -> list[int]:    #[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
     computer.Accept(UpdateVisitor())
@@ -75,7 +69,7 @@ last_temp = 1000         #set it very high so first iteration of get_temperature
 ser = None
 update_frequency = 20 # once every n seconds
 useLHM = True
-commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using OHM's reading\n"
+commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using LHM's reading\n"
 last_message = "0"
 last_battery_used = True
 
@@ -90,18 +84,6 @@ def send_to_arduino(message):
     except:
         log(f"in send_to_arduino Failed to open serial")
         return False
-    
-
-
-
-def on_sign_out():
-    global isRunning
-    isRunning = False 
-    log("ended by FanArduinoController.pyw")
-    # print("Signing out... Sending 0 to Arduino")
-    send_to_arduino('0')
-
-
 
 
 average_temp = None
@@ -109,9 +91,11 @@ weights = [1.2, 0.8, 1.2, 0.8]   # <=[cpu_max_tmp, cpu_average_tmp, gpu_max_temp
 temps = None
 update_arduino = False
 new_duty_cycle = None
+sum_weights = weights[0]+weights[1]+weights[2]+weights[3]
+update_arduino = False
 
 def get_temperature_from_lhm_and_set_arduino():
-    global isRunning, last_temp, useLHM, loop_count
+    global isRunning, last_temp, useLHM, average_temp, temps, sum_weights, update_arduino
     while isRunning:
         try:
             if useLHM:
@@ -119,7 +103,7 @@ def get_temperature_from_lhm_and_set_arduino():
                 
                 try:
                     temps = get_temp()     #[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gpu_average_temp]
-                    average_temp = int((temps[0]*weights[0]+temps[1]*weights[1]+temps[2]*weights[2]+temps[3]*weights[3])/4)
+                    average_temp = int((temps[0]*weights[0]+temps[1]*weights[1]+temps[2]*weights[2]+temps[3]*weights[3])/sum_weights)
                 except:
                     log("some fucked up shit happened. check the code!")
                 update_arduino = False
@@ -139,7 +123,7 @@ def get_temperature_from_lhm_and_set_arduino():
                 if update_arduino:
                     send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {new_duty_cycle},      average_temp: {average_temp}C,      cpu_max: {temps[0]}C,      gpu_max: {temps[2]}C,      last_temp: {last_temp}C", new_duty_cycle, average_temp)
 
-        except Exception as e:
+        except:
             log("some fucked up shit happened. check the code!")
         time.sleep(update_frequency)
 
@@ -149,16 +133,12 @@ def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle, av
     send_to_arduino(new_duty_cycle)
     last_temp = average_temp
 
+# Define maximum log size (in bytes)
+MAX_LOG_SIZE = 1024 * 50  # 50 kilobytes (adjust as needed)
+file_size = None
 def log(message):
+    global file_size
     """Logs a message with a timestamp to a limited-size file."""
-    import time
-
-    # Define maximum log size (in bytes)
-    MAX_LOG_SIZE = 1024 * 10  # 10 kilobytes (adjust as needed)
-
-    current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    formatted_message = f"{current_time}: {message}\n"
-
     try:
         # Open the log file in append mode
         with open('log.txt', 'a') as file:
@@ -170,26 +150,79 @@ def log(message):
                 file.truncate(0)  # Clear the file content
 
             # Write the formatted message
-            file.write(formatted_message)
-    except OSError:
-        # Handle potential file access errors
+            file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}: {message}\n")
+    except:
+        # nothing to do because printing fails meaning no way of knowing
         pass
   
-def check_for_command():
-    global useLHM, commander_message, isRunning
+# def check_for_command():
+#     global useLHM, commander_message, isRunning
+#     while isRunning:
+#         try:
+#             if os.path.getsize('command.txt') > len(commander_message):
+#                 with open('command.txt', 'r+') as file:
+#                     content = file.read()
+#                     commandline = content.split("\n")
+#                     if commandline[1] == "-1":
+#                         useLHM = True
+#                         log("back at using OHM reading auto control!")
+#                     elif int(commandline[1]) >= 0 and int(commandline[1]) <= 255:
+#                         useLHM = False
+#                         inputPWM = commandline[1]
+#                         send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {inputPWM} by the commander!", inputPWM, 1000)
+#                         log(f"commander now incharge!")
+#                     file.seek(0)
+#                     file.truncate()
+#                     file.write(commander_message)
+#             elif os.path.getsize('command.txt') < len(commander_message):
+#                 file.write(commander_message)
+#         except:
+#             try:
+#                 with open('command.txt', 'w') as file:
+#                     file.write(commander_message)
+#             except:
+#                 log("there is a serious error in the check_for_command method!")
+#         finally:
+#             time.sleep(update_frequency)
+
+command = None
+def redo():
+    global last_message, last_battery_used, ser
+    global useLHM, commander_message, isRunning, command
     while isRunning:
+        time.sleep(update_frequency)
+        if is_on_battery_power():
+            if last_battery_used == False:
+                last_battery_used = True
+                log("computer disconnected from docking station!")
+
+        else:
+            if last_battery_used == True:
+                try:
+                    log("computer connected to docking station! starting the serial connection and commanding pwm!")
+                    ser = serial.Serial('COM4', 9600, timeout=1)
+                    time.sleep(3)
+                    ser.write((last_message + '\n').encode())
+                    last_battery_used = False
+                except:
+                    try:
+                        ser.write((last_message + '\n').encode())
+                        last_battery_used = False
+                    except:
+                        last_battery_used = True
+                        continue
+
+        #commander
         try:
             if os.path.getsize('command.txt') > len(commander_message):
                 with open('command.txt', 'r+') as file:
-                    content = file.read()
-                    commandline = content.split("\n")
-                    if commandline[1] == "-1":
+                    command = file.read().split("\n")[1]
+                    if command == "-1":
                         useLHM = True
                         log("back at using OHM reading auto control!")
-                    elif int(commandline[1]) >= 0 and int(commandline[1]) <= 255:
+                    elif int(command) >= 0 and int(command) <= 255:
                         useLHM = False
-                        inputPWM = commandline[1]
-                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {inputPWM} by the commander!", inputPWM, 1000)
+                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {command} by the commander!", command, 1000)
                         log(f"commander now incharge!")
                     file.seek(0)
                     file.truncate()
@@ -202,31 +235,6 @@ def check_for_command():
                     file.write(commander_message)
             except:
                 log("there is a serious error in the check_for_command method!")
-        finally:
-            time.sleep(update_frequency)
-
-def redo():
-    global last_message, last_battery_used, ser
-    while isRunning:
-        time.sleep(5)
-        if last_battery_used == True and not is_on_battery_power():
-            try:
-                log("computer connected to docking station! starting the serial connection and commanding pwm!")
-                ser = serial.Serial('COM4', 9600, timeout=1)
-                time.sleep(3)
-                ser.write((last_message + '\n').encode())
-            except:
-                try:
-                    time.sleep(3)
-                    ser.write((last_message + '\n').encode())
-                except:
-                    last_battery_used == True
-                    continue
-            log("finished redoing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        last_battery_used = is_on_battery_power()
-
-
-    
 
 
 if __name__ == "__main__":
@@ -238,24 +246,18 @@ if __name__ == "__main__":
             time.sleep(4)
         except:
             log(f"in main Failed to open serial port")
-
+        
+        last_battery_used = is_on_battery_power()
 
         log("started")
         send_to_arduino('150')
 
-
         t = threading.Thread(target=get_temperature_from_lhm_and_set_arduino)
         log("starting loop")
         t.start()
-
-
-        commanderrr = threading.Thread(target=check_for_command)
-        commanderrr.start()
-
 
         rd = threading.Thread(target=redo)
         rd.start()
 
     else:
         log("no permission code exiting")
-
