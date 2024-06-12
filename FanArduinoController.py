@@ -77,7 +77,7 @@ update_frequency = 20 # once every n seconds
 useLHM = True
 commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using OHM's reading\n"
 last_message = "0"
-last_used_battery = True
+last_battery_used = True
 
 
 def send_to_arduino(message):
@@ -90,6 +90,9 @@ def send_to_arduino(message):
     except:
         log(f"in send_to_arduino Failed to open serial")
         return False
+    
+
+
 
 def on_sign_out():
     global isRunning
@@ -203,19 +206,27 @@ def check_for_command():
             time.sleep(update_frequency)
 
 def redo():
-    global last_message, last_used_battery, ser
+    global last_message, last_battery_used, ser
     while isRunning:
         time.sleep(5)
-        if last_used_battery == True and not is_on_battery_power():
+        if last_battery_used == True and not is_on_battery_power():
             try:
                 log("computer connected to docking station! starting the serial connection and commanding pwm!")
                 ser = serial.Serial('COM4', 9600, timeout=1)
-                time.sleep(4)
-                send_to_arduino(last_message)
+                time.sleep(3)
+                ser.write((last_message + '\n').encode())
             except:
-                pass
-        last_used_battery == is_on_battery_power()
+                try:
+                    time.sleep(3)
+                    ser.write((last_message + '\n').encode())
+                except:
+                    last_battery_used == True
+                    continue
+            log("finished redoing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        last_battery_used = is_on_battery_power()
 
+
+    
 
 
 if __name__ == "__main__":
@@ -247,3 +258,4 @@ if __name__ == "__main__":
 
     else:
         log("no permission code exiting")
+
