@@ -24,37 +24,15 @@ void loop() {
         byte newDutyCycle = (byte)inputValue; // Convert the integer to a byte
         // EEPROM.update(eepromAddress, newDutyCycle);
         dutyCycle = newDutyCycle;
-        Serial.print("Stored value: ");
-        Serial.println(newDutyCycle);
+        // Serial.print("The new DutyCycle: ");
+        // Serial.println(newDutyCycle);
       } else {
-        Serial.println("Input out of byte range. Please enter a number between 0 and 255.");
+        // Serial.println("Input out of byte range. Please enter a number between 0 and 255.");
       }
     }
   }
   analogWrite(pwmPin, dutyCycle); // Set PWM duty cycle
-  Serial.print(dutyCycle);
   delay(1000); // Delay for 1 second (adjust as needed)
+  // Serial.println(dutyCycle); //send heart beat every second!!! (this is for the connection_check funciton in FanArduinoController.pyw)
+  // Serial.println("b");
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
