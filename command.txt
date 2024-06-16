@@ -1,0 +1,1 @@
+enter pwm of 0-255 for custom command and -1 for using automatic speed control using LHM's reading
