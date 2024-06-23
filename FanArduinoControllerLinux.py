@@ -35,5 +35,10 @@ def log(message):
         # nothing to do because printing fails meaning no way of knowing
         pass
 
-input = input("enter pwm: ")
-send_to_arduino(input)
+# input = input("enter pwm: ")
+# send_to_arduino(input)
+while True:
+    try:
+        send_to_arduino("100")
+    finally:
+        time.sleep(60)
