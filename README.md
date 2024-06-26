@@ -7,14 +7,17 @@ Create /etc/systemd/system/FanArduinoControllerLinux.service:
 
 [Unit]
 Description=Start running FanArduinoControllerLinux.py script for my laptop docking station automatically
+After=network.target
 
 [Service]
+ExecStartPre=/bin/sleep 60
 ExecStart=/usr/bin/python3 /home/yoni/LibreHardwareMonitor/FanArduinoControllerLinux.py
 Restart=always
 User=yoni
 
 [Install]
 WantedBy=multi-user.target
+
 
 
 
