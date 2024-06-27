@@ -65,7 +65,7 @@ while True:
         if read_from_arduino():
             time.sleep(100)
         else:
-            looper += 1
+            looper = (looper + 1)%len(ports)
         
     finally:
         ser.close()
