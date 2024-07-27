@@ -64,7 +64,7 @@ def get_temp() -> list[int]:    #[cpu_max_tmp, cpu_average_tmp, gpu_max_temp, gp
 isRunning = True
 last_temp = 1000         #set it very high so first iteration of get_temperature_from_ohm() will definatly change the fan speed to the appropiate dutyCycle.
 ser = None
-update_frequency = 20 # once every n seconds
+update_frequency = 5 # once every n seconds
 useLHM = True
 commander_message = "enter pwm of 0-255 for custom command and -1 for using automatic speed control using LHM's reading\n"
 last_message = "0"
@@ -122,8 +122,8 @@ def log(message):
         pass
 
 command = None
+COM = 'COM3'
 def main():
-    global starttime
 
     global isRunning, last_temp, useLHM, average_temp, temps, sum_weights
     global last_message, last_battery_used, ser
@@ -139,7 +139,7 @@ def main():
             if last_battery_used == True:
                 try:
                     log("computer connected to docking station! starting the serial connection and commanding pwm!")
-                    ser = serial.Serial('COM4', 9600, timeout=1)
+                    ser = serial.Serial(COM, 9600, timeout=1)
                     time.sleep(3)
                     ser.write((last_message + '\n').encode())
                     last_battery_used = False
@@ -153,21 +153,30 @@ def main():
 
         #commander
         try:
-            if os.path.getsize('command.txt') > len(commander_message):
-                with open('command.txt', 'r+') as file:
-                    command = file.read().split("\n")[1]
+            command_detected = False
+            with open('command.txt', 'r') as file:
+                command_raw = file.read()
+                command = command_raw[1]
+                if len(command_raw) > (len(commander_message) + 1):
+                    log(f"commander text message!")
+                    # for i, text in enumerate(command_raw.split("\n")):
+                    #     log("command" + str(i) + ": " + text)
                     if command == "-1":
                         useLHM = True
+                        command_detected = True
                         log("back at using LHM reading auto control!")
                     elif int(command) >= 0 and int(command) <= 255:
                         useLHM = False
+                        command_detected = True
                         send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {command} by the commander!", command, 1000)
                         log(f"commander now incharge!")
-                    file.seek(0)
-                    file.truncate()
+                if len(command_raw) < len(commander_message) + 1:
+                    command_detected = True
+
+            if command_detected:
+                with open('command.txt', 'w') as file:
                     file.write(commander_message)
-            elif os.path.getsize('command.txt') < len(commander_message):
-                file.write(commander_message)
+            
         except:
             try:
                 with open('command.txt', 'w') as file:
@@ -196,7 +205,7 @@ if __name__ == "__main__":
     # Ensure the script runs with administrator privileges
     if windll.shell32.IsUserAnAdmin():
         try:
-            ser = serial.Serial('COM4', 9600, timeout=1)
+            ser = serial.Serial(COM, 9600, timeout=1)
             time.sleep(4)
         except:
             log(f"in main Failed to open serial port")
