@@ -95,9 +95,6 @@ def pwm_tuner(average_temp) -> str:
         return "255"
     return str(int(246/(1+60000*(2**(-float(average_temp)/4)))+11))
 
-def send_arduino_with_log_with_last_temps_duty_cycle(message, new_duty_cycle):
-    log(message)
-    send_to_arduino(new_duty_cycle)
 
 # Define maximum log size (in bytes)
 MAX_LOG_SIZE = 1024 * 50  # 50 kilobytes (adjust as needed)
@@ -157,7 +154,7 @@ def main():
             with open('command.txt', 'r') as file:
                 command_raw = file.read()
                 command = command_raw[1]
-                if len(command_raw) > (len(commander_message)):
+                if len(command_raw) > len(commander_message):
                     log(f"commander text message!")
                     # for i, text in enumerate(command_raw.split("\n")):
                     #     log("command" + str(i) + ": " + text)
@@ -168,7 +165,8 @@ def main():
                     elif int(command) >= 0 and int(command) <= 255:
                         useLHM = False
                         command_detected = True
-                        send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {command} by the commander!", command, 1000)
+                        log(f"new_duty_cycle: {command} by the commander!")
+                        send_to_arduino(command)
                         log(f"commander now incharge!")
                 if len(command_raw) < len(commander_message):
                     log(len(command_raw))
