@@ -157,7 +157,7 @@ def main():
             with open('command.txt', 'r') as file:
                 command_raw = file.read()
                 command = command_raw[1]
-                if len(command_raw) > (len(commander_message) + 1):
+                if len(command_raw) > (len(commander_message)):
                     log(f"commander text message!")
                     # for i, text in enumerate(command_raw.split("\n")):
                     #     log("command" + str(i) + ": " + text)
@@ -170,7 +170,8 @@ def main():
                         command_detected = True
                         send_arduino_with_log_with_last_temps_duty_cycle(f"new_duty_cycle: {command} by the commander!", command, 1000)
                         log(f"commander now incharge!")
-                if len(command_raw) < len(commander_message) + 1:
+                if len(command_raw) < len(commander_message):
+                    log(len(command_raw))
                     command_detected = True
 
             if command_detected:
