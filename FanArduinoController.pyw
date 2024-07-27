@@ -153,7 +153,7 @@ def main():
             command_detected = False
             with open('command.txt', 'r') as file:
                 command_raw = file.read()
-                command = command_raw[1]
+                command = command_raw.split("\n")[1]
                 if len(command_raw) > len(commander_message):
                     log(f"commander text message!")
                     # for i, text in enumerate(command_raw.split("\n")):
