@@ -1,5 +1,7 @@
 for linux to auto start FanArduinoControllerLinux.py:
 Run it as a service.
+run:
+sudo usermod -aG dialout yoni
 
 Create /etc/systemd/system/FanArduinoControllerLinux.service:
 
